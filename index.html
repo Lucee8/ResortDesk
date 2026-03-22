@@ -612,8 +612,8 @@ async function submitForm(e){
     notes:document.getElementById('notes').value,
     registeredAt:now.toLocaleString('en-IN'),
     status:'Checked In',
-    idFrontCaptured:frontData?'Yes':'No',
-    idBackCaptured:backData?'Yes':'No',
+    idFront:frontData||'',
+    idBack:backData||'',
   };
   guests.push(data);
   localStorage.setItem('resort_guests',JSON.stringify(guests));
@@ -718,7 +718,7 @@ function viewGuest(idx){
     item('Total Amount','₹'+(g.amount||0))+item('Advance Paid','₹'+(g.advance||0))+
     item('Balance Due','<span style="color:'+(bal>0?'var(--warn)':'var(--success)')+'">₹'+bal+' — '+g.payStatus+'</span>')+item('Pay Mode',g.payMode||'—')+
     item('City',g.city||'—')+item('Nationality',g.nationality)+
-    item('ID Front',g.idFrontCaptured==='Yes'?'✅ Captured':'—')+item('ID Back',g.idBackCaptured==='Yes'?'✅ Captured':'—')+
+    item('ID Front',g.idFront&&g.idFront.length>10?'✅ Captured':'—')+item('ID Back',g.idBack&&g.idBack.length>10?'✅ Captured':'—')+
     (g.requests?'<div class="detail-item" style="grid-column:span 2">'+dLabel('Special Requests')+dVal(g.requests)+'</div>':'')+
     (g.notes?'<div class="detail-item" style="grid-column:span 2">'+dLabel('Staff Notes')+dVal(g.notes)+'</div>':'')+
     item('Registered',g.registeredAt)+
