@@ -570,7 +570,7 @@ tr:hover td{background:rgba(201,168,76,.03);}
 // ══════════════════════════════════════════════════
 // ★ REPLACE THIS WITH YOUR APPS SCRIPT WEB APP URL
 // ══════════════════════════════════════════════════
-const REGISTRY_URL  = 'https://script.google.com/macros/s/AKfycbwWMRZp0DOB0dT3qE8KGBq8UM3FZyUvuprptTHC_jsqZ6zaAXBotl8cCNcDAz7Zjerl/exec';
+const REGISTRY_URL  = 'https://script.google.com/macros/s/AKfycbwiIAlfXcQ9SkeYvFpxGHlts1TDwSRXitulY5HsoThT6ZnOTqwEI12ezGDTAGlkdVMe/exec';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 // ── SESSION GUARD — fires before anything loads ──
@@ -588,7 +588,7 @@ const SESSION = (function(){
 })();
 
 function redirectLogin(msg) {
-  var url = 'login.html';
+  var url = 'signin.html';
   if (SESSION && SESSION.hotelId) url += '?hotel=' + SESSION.hotelId;
   if (msg) url += (url.includes('?') ? '&' : '?') + 'msg=' + encodeURIComponent(msg);
   window.location.replace(url);
@@ -650,7 +650,12 @@ window.addEventListener('DOMContentLoaded', () => {
   loadFromSheets();
   updateClock(); setInterval(updateClock, 1000);
   // Auto-refresh every 2 minutes
-  setInterval(loadFromSheets, 120000);
+  setInterval(loadFromSheets, 30000); // refresh every 30 seconds
+
+  // Also refresh when tab becomes visible again (user switches back)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadFromSheets();
+  });
 });
 
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -668,13 +673,55 @@ function populateRooms() {
 function toISO(d) {
   if (!d) return '';
   d = String(d).trim();
-  if (!d || d === '—') return '';
+  if (!d || d === '—' || d === 'undefined' || d === 'null') return '';
+
+  // Already ISO: 2026-03-29
   if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-  if (d.includes('T')) return d.split('T')[0];
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) { const p=d.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
-  if (d.includes('/')) { const p=d.split('/'); if(p.length===3){ if(parseInt(p[0])>12) return p[2]+'-'+pad(parseInt(p[1]))+'-'+pad(parseInt(p[0])); return p[2]+'-'+pad(parseInt(p[0]))+'-'+pad(parseInt(p[1])); }}
-  try { const dt=new Date(d); if(!isNaN(dt.getTime())) return dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate()); } catch(e){}
-  return d;
+
+  // ISO with time: 2026-03-29T00:00:00
+  if (/^\d{4}-\d{2}-\d{2}T/.test(d)) return d.split('T')[0];
+
+  // DD/MM/YYYY — Indian format (our form saves this)
+  // Must check DD>12 OR MM<=12 — safest: always treat first as DD for Indian dates
+  const slashParts = d.split('/');
+  if (slashParts.length === 3) {
+    const a = parseInt(slashParts[0]);
+    const b = parseInt(slashParts[1]);
+    const c = parseInt(slashParts[2]);
+    if (c > 1900) {
+      // c is the year — figure out DD and MM
+      if (a > 12) {
+        // First part > 12, must be DD
+        return c + '-' + pad(b) + '-' + pad(a);
+      } else if (b > 12) {
+        // Second part > 12, must be DD — so format is MM/DD/YYYY
+        return c + '-' + pad(a) + '-' + pad(b);
+      } else {
+        // Both <= 12, ambiguous — assume DD/MM/YYYY (Indian)
+        return c + '-' + pad(b) + '-' + pad(a);
+      }
+    }
+  }
+
+  // Google Sheets date serial number (days since Dec 30 1899)
+  if (/^\d+(\.\d+)?$/.test(d)) {
+    const n = parseFloat(d);
+    if (n > 40000 && n < 60000) {
+      const dt = new Date((n - 25569) * 86400000);
+      return dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth()+1) + '-' + pad(dt.getUTCDate());
+    }
+  }
+
+  // Google Sheets returns full string: "Sun Mar 29 2026 00:00:00 GMT+0530"
+  // Extract day/month/year directly from the string — never use new Date() which shifts timezone
+  const monthMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  const parts = d.match(/([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})/);
+  if (parts) {
+    const mon = monthMap[parts[1].toLowerCase()];
+    if (mon) return parts[3] + '-' + mon + '-' + pad(parseInt(parts[2]));
+  }
+
+  return '';
 }
 function fmtDate(d) {
   if (!d) return '—';
@@ -705,16 +752,33 @@ function generateGuestId() {
 async function loadFromSheets() {
   setSyncStatus('loading', 'Syncing…');
   try {
-    const res  = await fetch(REGISTRY_URL + '?action=guests&hotelId=' + encodeURIComponent(HOTEL_ID), {cache:'no-store'});
-    const json = await res.json();
+    // Always fetch fresh from Google Sheets — never use cache
+    const url  = REGISTRY_URL + '?action=guests&hotelId=' + encodeURIComponent(HOTEL_ID) + '&t=' + Date.now();
+    const res  = await fetch(url, {cache:'no-store'});
+
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); } catch(e) { throw new Error('Invalid JSON from sheet'); }
+
     if (json.status === 'success' && Array.isArray(json.data)) {
       guests = json.data;
+      // Save to localStorage only as offline fallback
       try { localStorage.setItem(LS_KEY, JSON.stringify(guests)); } catch(e){}
       setSyncStatus('ok', 'Synced ✓');
       updateStats(); renderTable(); renderAvailability(); renderRevenue();
-    } else { setSyncStatus('error', 'Sheet error'); }
+    } else {
+      throw new Error(json.message || 'Sheet returned error');
+    }
   } catch(err) {
-    setSyncStatus('error', 'Offline — cached');
+    console.error('Sync failed:', err.message);
+    // Only use localStorage as fallback — show warning
+    const cached = localStorage.getItem(LS_KEY);
+    if (cached) {
+      try { guests = JSON.parse(cached); } catch(e) { guests = []; }
+    }
+    setSyncStatus('error', 'Sync failed — showing cached data');
     updateStats(); renderTable(); renderAvailability(); renderRevenue();
   }
 }
@@ -751,15 +815,20 @@ function showPage(p) {
 
 function logout() {
   localStorage.removeItem('rd_session');
-  window.location.replace('login.html?hotel=' + HOTEL_ID);
+  window.location.replace('signin.html?hotel=' + HOTEL_ID);
 }
 
 // ── STATS ──
 function updateStats() {
-  const today   = new Date().toISOString().split('T')[0];
-  const todayIn = guests.filter(g => toISO(g.checkIn) === today).length;
-  const inHouse = guests.filter(g => g.status === 'Checked In').length;
-  const todayOut= guests.filter(g => toISO(g.checkOut)===today && g.status==='Checked Out').length;
+  // Get today's date in IST (UTC+5:30)
+  const now   = new Date();
+  const ist   = new Date(now.getTime() + (5.5 * 3600000));
+  const today = ist.getUTCFullYear() + '-' + pad(ist.getUTCMonth()+1) + '-' + pad(ist.getUTCDate());
+
+  const todayIn  = guests.filter(g => toISO(g.checkIn)  === today).length;
+  const inHouse  = guests.filter(g => g.status === 'Checked In').length;
+  const todayOut = guests.filter(g => toISO(g.checkOut) === today && g.status === 'Checked Out').length;
+
   document.getElementById('stat1').textContent = todayIn;
   document.getElementById('stat2').textContent = inHouse;
   document.getElementById('stat3').textContent = todayOut;
@@ -870,6 +939,9 @@ async function submitForm(e) {
     document.getElementById('formFooterNote').textContent = '⚠️ Free plan: ' + guests.length + '/50 check-ins used';
     if (guests.length >= 50) showUpgradeBanner();
   }
+
+  // Reload from sheet after 2 seconds to confirm data saved and sync all devices
+  setTimeout(() => loadFromSheets(), 2000);
 }
 
 // ── WHATSAPP ──
@@ -999,7 +1071,9 @@ function checkoutGuest(idx) {
   try{localStorage.setItem(LS_KEY,JSON.stringify(guests));}catch(e){}
   updateStats(); renderTable(); renderAvailability();
   showToast(guests[idx].firstName+' '+guests[idx].lastName+' checked out ✓','success');
-  fetch(REGISTRY_URL+'?action=checkout&hotelId='+encodeURIComponent(HOTEL_ID)+'&guestId='+encodeURIComponent(guests[idx].guestId)+'&doneBy='+encodeURIComponent(USER_NAME)).catch(()=>{});
+  fetch(REGISTRY_URL+'?action=checkout&hotelId='+encodeURIComponent(HOTEL_ID)+'&guestId='+encodeURIComponent(guests[idx].guestId)+'&doneBy='+encodeURIComponent(USER_NAME))
+    .then(() => setTimeout(() => loadFromSheets(), 1500))
+    .catch(()=>{});
 }
 
 // ── EDIT GUEST ──
