@@ -155,7 +155,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 // ══════════════════════════════════════════════════
 // ★ REPLACE THIS WITH YOUR APPS SCRIPT WEB APP URL
 // ══════════════════════════════════════════════════
-const REGISTRY_URL = 'https://script.google.com/macros/s/AKfycbwWMRZp0DOB0dT3qE8KGBq8UM3FZyUvuprptTHC_jsqZ6zaAXBotl8cCNcDAz7Zjerl/exec';
+const REGISTRY_URL = 'https://script.google.com/macros/s/AKfycbwiIAlfXcQ9SkeYvFpxGHlts1TDwSRXitulY5HsoThT6ZnOTqwEI12ezGDTAGlkdVMe/exec';
 
 // Session expires after 12 hours
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -174,7 +174,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Check for valid existing session first
   const s = getSession();
   if (s && s.hotelId === hotelId && !isSessionExpired(s)) {
-    window.location.href = 'ResortDesk.html';
+    window.location.href = 'index.html';
     return;
   }
 
@@ -202,23 +202,38 @@ window.addEventListener('DOMContentLoaded', async () => {
       showState('no-resort');
     }
   } catch(err) {
-    showState('no-resort');
+    console.error('Hotel verify failed:', err);
+    // Show error with retry option instead of permanent "Invalid Link"
+    document.getElementById('resort-display-name').textContent = 'Connection Error';
+    document.getElementById('resort-display-loc').textContent  = 'Could not reach server';
+    document.getElementById('loading-state').style.display = 'none';
+    document.getElementById('no-resort-error').style.display = 'block';
+    document.getElementById('no-resort-error').innerHTML = '<h3>⚠️ Connection Error</h3><p>Could not connect to the server.<br/>Please check your internet and <a href="" style="color:var(--gold-light)">click here to retry</a>.</p>';
   }
 });
 
 // ── Show/hide UI states ──
 function showState(state) {
-  document.getElementById('loading-state').style.display    = state === 'loading'   ? 'block' : 'none';
-  document.getElementById('no-resort-error').style.display  = state === 'no-resort' ? 'block' : 'none';
-  document.getElementById('suspended-error').style.display  = state === 'suspended' ? 'block' : 'none';
-  document.getElementById('login-ui').style.display         = state === 'login'     ? 'block' : 'none';
-  document.getElementById('login-footer').style.display     = state === 'login'     ? 'block' : 'none';
+  // Always hide loading first
+  document.getElementById('loading-state').style.display   = 'none';
+  document.getElementById('no-resort-error').style.display = 'none';
+  document.getElementById('suspended-error').style.display = 'none';
+  document.getElementById('login-ui').style.display        = 'none';
+  document.getElementById('login-footer').style.display    = 'none';
 
-  if (state !== 'loading') {
-    document.getElementById('resort-display-name').textContent =
-      state === 'no-resort' ? 'Access Denied' :
-      state === 'suspended' ? 'Account Suspended' :
-      (hotelInfo ? hotelInfo.name : 'ResortDesk');
+  // Then show the right one
+  if (state === 'loading') {
+    document.getElementById('loading-state').style.display = 'block';
+  } else if (state === 'no-resort') {
+    document.getElementById('no-resort-error').style.display = 'block';
+    document.getElementById('resort-display-name').textContent = 'Access Denied';
+  } else if (state === 'suspended') {
+    document.getElementById('suspended-error').style.display = 'block';
+    document.getElementById('resort-display-name').textContent = 'Account Suspended';
+  } else if (state === 'login') {
+    document.getElementById('login-ui').style.display     = 'block';
+    document.getElementById('login-footer').style.display = 'block';
+    if (hotelInfo) document.getElementById('resort-display-name').textContent = hotelInfo.name;
   }
 }
 
@@ -263,7 +278,7 @@ async function doLogin(role) {
         plan:      json.plan,
         loginTime: new Date().toISOString(),
       });
-      window.location.href = 'ResortDesk.html';
+      window.location.href = 'index.html';
     } else {
       showError(role, json.message || 'Login failed. Please try again.');
       if (role === 'staff') {
