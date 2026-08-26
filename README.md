@@ -5,8 +5,7 @@ ResortDesk is a lightweight, cloud-based guest management system designed for sm
 ---
 
 ## 🚀 Live Demo
-👉 https://desk.mykonoscottagetarkarli.com/index.html
-
+👉[https://lucee8.github.io/ResortDesk/]
 ---
 
 ## ✨ Features
